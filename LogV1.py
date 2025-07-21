@@ -3,51 +3,86 @@ import tkinter as tk
 from tkinter import ttk
 import os
 
-# Correct relative path
+# --- Load XML File ---
 xml_file = os.path.join("..", "ComputerScans 27-07-2025.xml")
-
-# Load and parse XML file
 tree = ET.parse(xml_file)
 root = tree.getroot()
 
-# Create main window
+# --- Create Main Window ---
 window = tk.Tk()
 window.title("ESET XML Log Viewer")
-window.geometry("900x400")
+window.geometry("950x500")
 
-# Create a frame for table and scrollbar
+# --- Frame for Table ---
 frame = tk.Frame(window)
 frame.pack(fill=tk.BOTH, expand=True)
 
-# Scrollbars
+# --- Scrollbars ---
 vsb = tk.Scrollbar(frame, orient="vertical")
 hsb = tk.Scrollbar(frame, orient="horizontal")
 
-# Table (Treeview)
+# --- Table (Treeview) ---
 columns = ("Time", "Scanned folders", "Scanned", "Detected", "Cleaned", "Status")
 treeview = ttk.Treeview(frame, columns=columns, show="headings",
                         yscrollcommand=vsb.set, xscrollcommand=hsb.set)
 
-# Configure scrollbars
 vsb.config(command=treeview.yview)
 hsb.config(command=treeview.xview)
 vsb.pack(side=tk.RIGHT, fill=tk.Y)
 hsb.pack(side=tk.BOTTOM, fill=tk.X)
 
-# Define column headings
+# --- Column Setup ---
 for col in columns:
     treeview.heading(col, text=col)
     treeview.column(col, width=150, anchor="w")
 
 treeview.pack(fill=tk.BOTH, expand=True)
 
-# Extract and insert data into table
+# --- Style for Meaningful Rows ---
+style = ttk.Style()
+style.configure("Treeview", rowheight=22)
+style.map("Treeview", background=[('selected', 'blue')])
+
+# Tag colors
+treeview.tag_configure("detected", background="#ffcccc")   # Light red for detected threats
+treeview.tag_configure("cleaned", background="#ccffcc")    # Light green for cleaned threats
+
+# --- Insert Data and Meaningful Tags ---
+total_scanned, total_detected, total_cleaned = 0, 0, 0
+
 for record in root.findall(".//RECORD"):
     row_data = []
+    detected, cleaned = 0, 0
+
     for col in columns:
         column = record.find(f".//COLUMN[@NAME='{col}']")
-        row_data.append(column.text if column is not None else "")
-    treeview.insert("", tk.END, values=row_data)
+        text = column.text if column is not None else ""
+        row_data.append(text)
 
-# Run the GUI
+        # Count stats
+        if col == "Scanned" and text.isdigit():
+            total_scanned += int(text)
+        elif col == "Detected" and text.isdigit():
+            detected = int(text)
+            total_detected += detected
+        elif col == "Cleaned" and text.isdigit():
+            cleaned = int(text)
+            total_cleaned += cleaned
+
+    # Tagging rows
+    if detected > 0:
+        treeview.insert("", tk.END, values=row_data, tags=("detected",))
+    elif cleaned > 0:
+        treeview.insert("", tk.END, values=row_data, tags=("cleaned",))
+    else:
+        treeview.insert("", tk.END, values=row_data)
+
+# --- Status Bar Summary ---
+status_label = tk.Label(window, text=f"Total Scanned: {total_scanned:,} | "
+                                    f"Total Detected: {total_detected} | "
+                                    f"Total Cleaned: {total_cleaned}",
+                        anchor="w", relief="sunken", bd=2, font=("Arial", 10))
+status_label.pack(fill=tk.X, side=tk.BOTTOM)
+
+# --- Run GUI ---
 window.mainloop()
