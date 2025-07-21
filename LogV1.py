@@ -1,9 +1,12 @@
 import xml.etree.ElementTree as ET
 import tkinter as tk
 from tkinter import ttk
+import os
+
+# Correct relative path
+xml_file = os.path.join("..", "ComputerScans 27-07-2025.xml")
 
 # Load and parse XML file
-xml_file = "ComputerScans 27-07-2025.xml"
 tree = ET.parse(xml_file)
 root = tree.getroot()
 
