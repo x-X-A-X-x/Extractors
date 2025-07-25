@@ -2,101 +2,81 @@ import xml.etree.ElementTree as ET
 import tkinter as tk
 from tkinter import ttk
 import os
-import matplotlib.pyplot as plt
-from datetime import datetime
 
 # --- Load XML File ---
 xml_file = os.path.join("..", "ComputerScans 27-07-2025.xml")
 tree = ET.parse(xml_file)
 root = tree.getroot()
 
-# --- Prepare Data for Table and Graphs ---
-columns = ("Time", "Scanned folders", "Scanned", "Detected", "Cleaned", "Status")
-records = []
-scanned_over_time = []
-detected_cleaned = {"Detected": 0, "Cleaned": 0}
+# --- Extract Data ---
+scans = []
+detected_counts = []
+cleaned_counts = []
+times = []
 
 for record in root.findall(".//RECORD"):
-    row = {}
-    for col in columns:
-        column = record.find(f".//COLUMN[@NAME='{col}']")
-        row[col] = column.text if column is not None else ""
-    records.append(row)
+    time = record.find(".//COLUMN[@NAME='Time']").text
+    scanned = int(record.find(".//COLUMN[@NAME='Scanned']").text)
+    detected = int(record.find(".//COLUMN[@NAME='Detected']").text)
+    cleaned = int(record.find(".//COLUMN[@NAME='Cleaned']").text)
 
-    # Collect graph data
-    try:
-        scanned = int(row["Scanned"])
-        time_obj = datetime.strptime(row["Time"], "%d/%m/%Y %I:%M:%S %p")
-        scanned_over_time.append((time_obj, scanned))
-        detected_cleaned["Detected"] += int(row["Detected"])
-        detected_cleaned["Cleaned"] += int(row["Cleaned"])
-    except:
-        pass
-
-# Sort by time for line graph
-scanned_over_time.sort(key=lambda x: x[0])
+    times.append(time)
+    scans.append(scanned)
+    detected_counts.append(detected)
+    cleaned_counts.append(cleaned)
 
 # --- Create Main Window ---
 window = tk.Tk()
-window.title("ESET XML Log Viewer with Graphs")
-window.geometry("950x500")
+window.title("ESET Log Viewer with Graphs")
+window.geometry("1000x700")
 
+# --- Table Frame ---
 frame = tk.Frame(window)
 frame.pack(fill=tk.BOTH, expand=True)
 
-vsb = tk.Scrollbar(frame, orient="vertical")
-hsb = tk.Scrollbar(frame, orient="horizontal")
-
-treeview = ttk.Treeview(frame, columns=columns, show="headings",
-                        yscrollcommand=vsb.set, xscrollcommand=hsb.set)
-vsb.config(command=treeview.yview)
-hsb.config(command=treeview.xview)
-vsb.pack(side=tk.RIGHT, fill=tk.Y)
-hsb.pack(side=tk.BOTTOM, fill=tk.X)
-
-# Define Table Columns
+columns = ("Time", "Scanned", "Detected", "Cleaned")
+treeview = ttk.Treeview(frame, columns=columns, show="headings")
 for col in columns:
     treeview.heading(col, text=col)
-    treeview.column(col, width=150, anchor="w")
+    treeview.column(col, width=200, anchor="w")
 treeview.pack(fill=tk.BOTH, expand=True)
 
-# Insert Records
-for row in records:
-    tags = ()
-    if int(row["Detected"]) > 0:
-        tags = ("detected",)
-    elif int(row["Cleaned"]) > 0:
-        tags = ("cleaned",)
-    treeview.insert("", tk.END, values=[row[c] for c in columns], tags=tags)
+# Insert table data
+for t, s, d, c in zip(times, scans, detected_counts, cleaned_counts):
+    treeview.insert("", tk.END, values=(t, f"{s:,}", d, c))
 
-treeview.tag_configure("detected", background="#ffcccc")
-treeview.tag_configure("cleaned", background="#ccffcc")
+# --- Graph Frame ---
+graph_frame = tk.LabelFrame(window, text="Scanned vs Detected vs Cleaned", padx=10, pady=10)
+graph_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
 
-# --- Graph Functions ---
-def show_graphs():
-    # Line Graph: Scanned over Time
-    times = [x[0] for x in scanned_over_time]
-    scanned_values = [x[1] for x in scanned_over_time]
+canvas = tk.Canvas(graph_frame, bg="white", height=300)
+canvas.pack(fill=tk.BOTH, expand=True)
 
-    plt.figure(figsize=(10, 5))
-    plt.plot(times, scanned_values, marker="o")
-    plt.title("Scanned Files Over Time")
-    plt.xlabel("Time")
-    plt.ylabel("Files Scanned")
-    plt.xticks(rotation=45)
-    plt.tight_layout()
-    plt.show()
+# --- Draw Bar Graph ---
+max_scan = max(scans) if scans else 1
+bar_width = 10
+spacing = 5
+x_offset = 40
+y_offset = 280
 
-    # Bar Graph: Detected vs Cleaned
-    plt.figure(figsize=(5, 4))
-    plt.bar(detected_cleaned.keys(), detected_cleaned.values(), color=["red", "green"])
-    plt.title("Detected vs Cleaned Threats")
-    plt.ylabel("Count")
-    plt.tight_layout()
-    plt.show()
+# Axes
+canvas.create_line(x_offset, y_offset, 900, y_offset, width=2)  # X-axis
+canvas.create_line(x_offset, y_offset, x_offset, 20, width=2)   # Y-axis
 
-# --- Button to Show Graphs ---
-graph_btn = tk.Button(window, text="Show Graphs", command=show_graphs)
-graph_btn.pack(pady=5)
+for i, (s, d, c) in enumerate(zip(scans, detected_counts, cleaned_counts)):
+    x = x_offset + i * (bar_width + spacing)
+    # Normalize heights
+    scan_height = (s / max_scan) * 250
+    det_height = (d / max_scan) * 250
+    clean_height = (c / max_scan) * 250
 
+    # Bars
+    canvas.create_rectangle(x, y_offset - scan_height, x + bar_width, y_offset, fill="blue", outline="black")
+    canvas.create_rectangle(x + bar_width + 1, y_offset - det_height, x + 2*bar_width, y_offset, fill="red", outline="black")
+    canvas.create_rectangle(x + 2*bar_width + 2, y_offset - clean_height, x + 3*bar_width, y_offset, fill="green", outline="black")
+
+# Labels
+canvas.create_text(100, 10, text="Blue = Scanned, Red = Detected, Green = Cleaned", fill="black", font=("Arial", 10))
+
+# --- Run GUI ---
 window.mainloop()
