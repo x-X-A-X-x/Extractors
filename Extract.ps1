@@ -1,12 +1,12 @@
 # --- Set Parameters ---
-$LogName = "System"
-$StartTime = Get-Date "2025-07-21T13:40:52"
+$LogName = "System"                   # Change to Application, Security, etc.
+$StartTime = (Get-Date).AddDays(-7)   # Logs from the past 7 days
 $EndTime = Get-Date
-$ExportCSV = "/home/sandbox/Desktop/System_Logs.csv"
-$ExportEVTX = "/home/sandbox/Desktop/System_Logs.evtx"
+$ExportCSV = "$env:USERPROFILE\Desktop\${LogName}_Logs.csv"
+$ExportEVTX = "$env:USERPROFILE\Desktop\${LogName}_Logs.evtx"
 
 # --- Export to CSV ---
-Get-WinEvent -FilterHashtable {
+Get-WinEvent -FilterHashtable @{
     LogName = $LogName;
     StartTime = $StartTime;
     EndTime = $EndTime
@@ -16,6 +16,6 @@ Get-WinEvent -FilterHashtable {
 wevtutil epl $LogName $ExportEVTX
 
 # --- Output ---
-Write-Host "✅ Logs from '$LogName' exported to:"
-Write-Host "   📄 CSV: $ExportCSV"
-Write-Host "   📂 EVTX: $ExportEVTX"
+Write-Host "Logs from '$LogName' exported to:"
+Write-Host "   CSV: $ExportCSV"
+Write-Host "   EVTX: $ExportEVTX"
