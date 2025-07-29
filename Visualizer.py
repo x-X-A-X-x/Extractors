@@ -1,7 +1,7 @@
 import pandas as pd
 import plotly.express as px
 import streamlit as st
-
+#Enter to terminal> streamlit run "d:/Directory of your.py"
 # -------------------
 # Load the CSV File
 # -------------------
