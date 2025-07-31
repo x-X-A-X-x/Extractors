@@ -29,7 +29,7 @@ if uploaded_file is not None:
     st.dataframe(df_filtered, height=300)
 
     # -------------------
-    # Visualization 1: Events over time
+    # Visualization 1: Events over tim
     # -------------------
     st.subheader("📈 Events Over Time")
     events_over_time = df_filtered.groupby(df_filtered["TimeCreated"].dt.hour).size().reset_index(name="Count")
