@@ -1,8 +1,11 @@
 import pandas as pd
 import plotly.express as px
 import streamlit as st
+import requests
+from bs4 import BeautifulSoup
 import os
 #streamlit run "d:/Directory of my code.py" 
+#do pip install requests beautifulsoup4
 st.set_page_config(page_title="Event Log Visualizer", layout="wide")
 st.title("🔍 Windows Event Log Visualizer (Cybersecurity Tool)")
 
@@ -11,6 +14,34 @@ if st.sidebar.button("🛑 Stop Visualizer"):
     st.warning("Visualizer stopped by user.")
     os._exit(0)
 
+# ================================
+# Scrape Event Error Code Explanations
+# ================================
+@st.cache_data
+def fetch_event_error_codes():
+    url = "https://learn.microsoft.com/en-us/defender-endpoint/event-error-codes"
+    response = requests.get(url)
+    soup = BeautifulSoup(response.text, "html.parser")
+
+    event_dict = {}
+    tables = soup.find_all("table")
+
+    for table in tables:
+        rows = table.find_all("tr")
+        for row in rows[1:]:  # skip header
+            cols = row.find_all(["td", "th"])
+            if len(cols) >= 2:
+                event_id = cols[0].text.strip()
+                description = cols[1].text.strip()
+                event_dict[event_id] = description
+
+    return event_dict
+
+event_explanations = fetch_event_error_codes()
+
+# ================================
+# File Upload
+# ================================
 uploaded_file = st.file_uploader("Upload Event Log CSV", type=["csv"])
 if uploaded_file is not None:
     df = pd.read_csv(uploaded_file)
@@ -48,26 +79,18 @@ if uploaded_file is not None:
     # =============================
     # Visualization 3: Top Event IDs
     # =============================
-    st.subheader("📊 Top Event IDs")
+    st.subheader("📊 Top Event IDs with Explanations")
     top_events = df_filtered["Id"].value_counts().reset_index()
     top_events.columns = ["Event ID", "Count"]
-    fig_ids = px.bar(top_events, x="Event ID", y="Count", title="Top Event IDs")
-    st.plotly_chart(fig_ids, use_container_width=True)
+    st.table(top_events)
 
-    # =============================
-    # Explanation Section
-    # =============================
-    st.subheader("ℹ️ Log Insights & Explanations")
-    st.markdown("""
-    - **Information**: Indicates normal operations. These logs confirm that services or tasks ran successfully.
-    - **Warning**: Highlights a potential issue that might require attention but is not critical.
-    - **Error**: Shows a failure or malfunction that requires immediate review.
-    - **Event IDs**: Each Event ID maps to a specific Windows event. For example:
-        - **4625**: Failed login attempt (Security log)
-        - **6006**: Event log service shutdown
-        - **41**: Unexpected system shutdown
-    - **Best Practice**: Regularly monitor Warning and Error logs for security or stability issues.
-    """)
+    # Show explanations
+    for event_id in top_events["Event ID"]:
+        str_event_id = str(event_id)
+        if str_event_id in event_explanations:
+            st.markdown(f"**{str_event_id}** → {event_explanations[str_event_id]}")
+        else:
+            st.markdown(f"**{str_event_id}** → No explanation available. [View Microsoft Docs](https://learn.microsoft.com/en-us/defender-endpoint/event-error-codes)")
 
     # =============================
     # Download Filtered Logs
