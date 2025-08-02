@@ -2,7 +2,7 @@ import pandas as pd
 import plotly.express as px
 import streamlit as st
 import os
-//streamlit run "d:/Directory of my code.py" 
+#streamlit run "d:/Directory of my code.py" 
 st.set_page_config(page_title="Event Log Visualizer", layout="wide")
 st.title("🔍 Windows Event Log Visualizer (Cybersecurity Tool)")
 
