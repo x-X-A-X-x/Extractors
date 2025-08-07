@@ -1,5 +1,5 @@
 # ELExtract_Split.ps1
-# Extracts System, Application, Security, and Setup logs into separate CSV files
+# Extracts System, Application, Security, and Setup logs into separate CSV files.
 
 # Set export folder (same as script location)
 $ExportPath = $PSScriptRoot
