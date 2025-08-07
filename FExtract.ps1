@@ -1,48 +1,31 @@
-# Set log file path (edit if using custom location)
+# Path to Windows Firewall log file
 $logPath = "C:\Windows\System32\LogFiles\Firewall\pfirewall.log"
 
-# Check if file exists
-if (-Not (Test-Path $logPath)) {
-    Write-Host "Log file not found at $logPath" -ForegroundColor Red
-    exit
-}
+# Read the file and skip comment lines
+$lines = Get-Content $logPath | Where-Object { $_ -notmatch "^#" -and $_.Trim() -ne "" }
 
-# Read lines, excluding comment lines
-$logLines = Get-Content $logPath | Where-Object { $_ -notmatch "^#" -and $_.Trim() -ne "" }
-
-# Define output object list
-$logData = @()
-
-foreach ($line in $logLines) {
+# Process each line into a structured object
+$entries = foreach ($line in $lines) {
     $fields = $line -split '\s+'
-
     if ($fields.Length -ge 13) {
-        $entry = [PSCustomObject]@{
-            Date       = $fields[0]
-            Time       = $fields[1]
-            Action     = $fields[2]
-            Protocol   = $fields[3]
-            SrcIP      = $fields[4]
-            DstIP      = $fields[5]
-            SrcPort    = $fields[6]
-            DstPort    = $fields[7]
-            Size       = $fields[8]
-            TcpFlags   = $fields[9]
-            TcpSyn     = $fields[10]
-            TcpAck     = $fields[11]
-            Interface  = $fields[12]
+        [PSCustomObject]@{
+            date       = $fields[0]
+            time       = $fields[1]
+            action     = $fields[2]
+            protocol   = $fields[3]
+            src_ip     = $fields[4]
+            dst_ip     = $fields[5]
+            src_port   = $fields[6]
+            dst_port   = $fields[7]
+            size       = $fields[8]
+            tcp_flags  = $fields[9]
+            tcp_syn    = $fields[10]
+            tcp_ack    = $fields[11]
+            interface  = $fields[12]
         }
-
-        $logData += $entry
     }
 }
 
-# Filter (optional): show only dropped packets
-$dropOnly = $logData | Where-Object { $_.Action -eq "DROP" }
-
-# Display
-$dropOnly | Format-Table -AutoSize
-
-# (Optional) Export to CSV
-$dropOnly | Export-Csv "$env:USERPROFILE\Desktop\firewall_dropped_packets.csv" -NoTypeInformation
-Write-Host "`nExported to: $env:USERPROFILE\Desktop\firewall_dropped_packets.csv" -ForegroundColor Green
+# Export to CSV (Splunk/Wazuh compatible)
+$entries | Export-Csv "$env:USERPROFILE\Desktop\firewall_for_siem.csv" -NoTypeInformation
+Write-Host "Exported to: $env:USERPROFILE\Desktop\firewall_for_siem.csv"
