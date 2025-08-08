@@ -1,31 +1,56 @@
-# Path to Windows Firewall log file
+# Path to your Windows Firewall log
 $logPath = "C:\Windows\System32\LogFiles\Firewall\pfirewall.log"
 
-# Read the file and skip comment lines
+# Check if log file exists
+if (-not (Test-Path $logPath)) {
+    Write-Host "Log file not found: $logPath" -ForegroundColor Red
+    exit
+}
+
+# Read the log and skip comment/header lines starting with #
 $lines = Get-Content $logPath | Where-Object { $_ -notmatch "^#" -and $_.Trim() -ne "" }
 
-# Process each line into a structured object
-$entries = foreach ($line in $lines) {
+$parsedEntries = foreach ($line in $lines) {
+    # Split on whitespace
     $fields = $line -split '\s+'
-    if ($fields.Length -ge 13) {
+    
+    # Ensure we have enough fields before processing
+    if ($fields.Length -ge 17) {
+        $pid = $fields[16]
+
+        # Try to get process name from PID
+        $procName = try {
+            (Get-Process -Id $pid -ErrorAction Stop).ProcessName
+        } catch {
+            "N/A"
+        }
+
+        # Build structured object
         [PSCustomObject]@{
-            date       = $fields[0]
-            time       = $fields[1]
-            action     = $fields[2]
-            protocol   = $fields[3]
-            src_ip     = $fields[4]
-            dst_ip     = $fields[5]
-            src_port   = $fields[6]
-            dst_port   = $fields[7]
-            size       = $fields[8]
-            tcp_flags  = $fields[9]
-            tcp_syn    = $fields[10]
-            tcp_ack    = $fields[11]
-            interface  = $fields[12]
+            date        = $fields[0]
+            time        = $fields[1]
+            action      = $fields[2]
+            protocol    = $fields[3]
+            src_ip      = $fields[4]
+            dst_ip      = $fields[5]
+            src_port    = $fields[6]
+            dst_port    = $fields[7]
+            size        = $fields[8]
+            tcpflags    = $fields[9]
+            tcpsyn      = $fields[10]
+            tcpack      = $fields[11]
+            tcpwin      = $fields[12]
+            icmptype    = $fields[13]
+            icmpcode    = $fields[14]
+            info        = $fields[15]
+            pid         = $pid
+            processname = $procName
         }
     }
 }
 
-# Export to CSV (Splunk/Wazuh compatible)
-$entries | Export-Csv "$env:USERPROFILE\Desktop\firewall_for_siem.csv" -NoTypeInformation
-Write-Host "Exported to: $env:USERPROFILE\Desktop\firewall_for_siem.csv"
+# Output CSV for SIEM ingestion
+$outFile = "$env:USERPROFILE\Desktop\firewall_with_process.csv"
+$parsedEntries | Export-Csv $outFile -NoTypeInformation
+
+Write-Host "Exported parsed firewall log to $outFile" -ForegroundColor Green
