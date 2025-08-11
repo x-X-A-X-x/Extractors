@@ -1,17 +1,18 @@
-<# 
+<#
 ELExtract_SplunkJSON.ps1
 Exports Windows Event Logs as JSON Lines (NDJSON) per log so Splunk can auto-extract fields.
 Default logs: System, Application, Security, Setup
 Default range: last 7 days
 Outputs: <LogName>_Logs.json in the script folder
-Usage examples:
+
+Examples:
   .\ELExtract_SplunkJSON.ps1
   .\ELExtract_SplunkJSON.ps1 -Logs Security -DaysBack 1 -OutDir "C:\Logs"
 #>
 
 [CmdletBinding()]
 param(
-  [Parameter(ValueFromPipeline=$false)]
+  [Parameter(ValueFromPipeline = $false)]
   [string[]]$Logs = @("System","Application","Security","Setup"),
 
   [int]$DaysBack = 7,
@@ -33,15 +34,16 @@ function Convert-WinEventToJsonObject {
   $eventData = @{}
   foreach ($d in $xml.Event.EventData.Data) {
     if ($null -ne $d) {
-      $name = $d.Name
-      if ([string]::IsNullOrWhiteSpace($name)) { continue }
-      $eventData[$name] = [string]$d.'#text'
+      $name = [string]$d.Name
+      if (-not [string]::IsNullOrWhiteSpace($name)) {
+        $eventData[$name] = [string]$d.'#text'
+      }
     }
   }
 
-  # Core fields
+  # Core fields (Execution attributes are ProcessID/ThreadID)
   $obj = [ordered]@{
-    _time          = (Get-Date $Event.TimeCreated -UFormat %s) # epoch seconds for Splunk
+    _time          = [int](Get-Date $Event.TimeCreated -UFormat %s)   # epoch secs for Splunk
     TimeCreated    = $Event.TimeCreated
     LogName        = $Event.LogName
     EventID        = $Event.Id
@@ -50,26 +52,25 @@ function Convert-WinEventToJsonObject {
     ProviderName   = $Event.ProviderName
     MachineName    = $Event.MachineName
     RecordId       = $Event.RecordId
-    ProcessId      = $Event.Properties | ForEach-Object { } | Out-Null; $xml.Event.System.Execution.ProcessID
-    ThreadId       = $xml.Event.System.Execution.ThreadID
-    Keywords       = $xml.Event.System.Keywords
-    Task           = $xml.Event.System.Task
-    Opcode         = $xml.Event.System.Opcode
-    Channel        = $xml.Event.System.Channel
-    SecurityUserId = $xml.Event.System.Security.UserID
-    Correlation    = $xml.Event.System.Correlation.ActivityID
+    ProcessId      = [string]$xml.Event.System.Execution.ProcessID
+    ThreadId       = [string]$xml.Event.System.Execution.ThreadID
+    Keywords       = [string]$xml.Event.System.Keywords
+    Task           = [string]$xml.Event.System.Task
+    Opcode         = [string]$xml.Event.System.Opcode
+    Channel        = [string]$xml.Event.System.Channel
+    SecurityUserId = [string]$xml.Event.System.Security.UserID
+    Correlation    = [string]$xml.Event.System.Correlation.ActivityID
     Message        = $Event.FormatDescription()
-    EventData      = $eventData  # keep also nested for reference
+    EventData      = $eventData
   }
 
-  # Also promote EventData keys to top-level for easy search (avoid collisions)
+  # Promote EventData keys to top-level for easier Splunk search (avoid collisions)
   foreach ($k in $eventData.Keys) {
-    if (-not $obj.Contains($k)) {
+    if (-not $obj.ContainsKey($k)) {
       $obj[$k] = $eventData[$k]
     }
   }
 
-  # Return as PSCustomObject
   return [pscustomobject]$obj
 }
 
@@ -83,19 +84,19 @@ foreach ($log in $Logs) {
   $outFile = Join-Path $OutDir ("{0}_Logs.json" -f $log)
   Write-Host ("Extracting {0} from {1:u} to {2:u} ..." -f $log, $StartTime, $EndTime)
 
+  $sw = $null
   try {
     # Stream to file as NDJSON (one JSON object per line)
     $sw = New-Object System.IO.StreamWriter($outFile, $false, [System.Text.Encoding]::UTF8)
 
     $query = @{
-      LogName    = $log
-      StartTime  = $StartTime
-      EndTime    = $EndTime
+      LogName   = $log
+      StartTime = $StartTime
+      EndTime   = $EndTime
     }
 
     Get-WinEvent -FilterHashtable $query -ErrorAction Stop | ForEach-Object {
-      $obj = Convert-WinEventToJsonObject -Event $_
-      # Convert to compact JSON (no formatting/newlines)
+      $obj  = Convert-WinEventToJsonObject -Event $_
       $json = $obj | ConvertTo-Json -Depth 6 -Compress
       $sw.WriteLine($json)
     }
