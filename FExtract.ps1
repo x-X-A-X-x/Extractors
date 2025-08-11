@@ -1,6 +1,6 @@
 <# Windows Firewall (W3C) -> NDJSON for Splunk/Wazuh #>
 
-# Expand %systemroot% path from the GUI setting
+# Log path exactly as in the GUI
 $logPathRaw = "%systemroot%\system32\LogFiles\Firewall\pfirewall.log"
 $logPath    = [Environment]::ExpandEnvironmentVariables($logPathRaw)
 
@@ -9,17 +9,35 @@ if (-not (Test-Path -LiteralPath $logPath)) {
     exit 1
 }
 
-# Read file
-$all = Get-Content -LiteralPath $logPath -Encoding UTF8
+# Try to read the file; if access is denied or locked, copy to temp and read the copy
+$all = $null
+try {
+    $all = Get-Content -LiteralPath $logPath -Encoding UTF8 -ErrorAction Stop
+}
+catch {
+    Write-Warning "Direct read failed ($($_.Exception.Message)). Copying to temp and reading the copy…"
+    $temp = Join-Path $env:TEMP "pfirewall_copy.log"
+    try {
+        Copy-Item -LiteralPath $logPath -Destination $temp -Force
+        $all = Get-Content -LiteralPath $temp -Encoding UTF8 -ErrorAction Stop
+    } catch {
+        Write-Error "Unable to read firewall log even after copying: $($_.Exception.Message)"
+        exit 2
+    }
+}
 
-# Discover actual column order from '#Fields:' header
+# Discover the column order from '#Fields:' if present; otherwise fall back to FW 1.5
 $headerLine = $all | Where-Object { $_ -match '^\s*#Fields:' } | Select-Object -First 1
-if (-not $headerLine) { throw "No '#Fields:' header found in $logPath" }
+if ($headerLine) {
+    $rawCols = $headerLine -replace '^\s*#Fields:\s*',''
+    $cols    = $rawCols -split '\s+' | Where-Object { $_ }
+} else {
+    # Default for Windows Firewall 1.5 when logging path/pid is enabled
+    $cols = @('date','time','action','protocol','src-ip','dst-ip','src-port','dst-port','size','tcpflags','tcpsyn','tcpack','tcpwin','icmptype','icmpcode','info','path','pid')
+    Write-Warning "No '#Fields:' header found. Using default FW 1.5 field list: $($cols -join ',')"
+}
 
-$rawCols = $headerLine -replace '^\s*#Fields:\s*',''
-$cols    = $rawCols -split '\s+' | Where-Object { $_ }
-
-# Map name -> index
+# Build name -> index map
 $idx = @{}
 for ($i=0; $i -lt $cols.Count; $i++) { $idx[$cols[$i]] = $i }
 
@@ -73,10 +91,10 @@ foreach ($line in $dataLines) {
     }
 
     $obj = [ordered]@{
-        ts            = $ts                      # preferred Splunk timestamp field
-        date          = $date                    # raw components kept for troubleshooting
+        ts            = $ts
+        date          = $date
         time          = $time
-        action        = $action                  # ALLOW/DROP
+        action        = $action
         protocol      = $protocol
         src_ip        = $src_ip
         dest_ip       = $dst_ip
@@ -89,7 +107,7 @@ foreach ($line in $dataLines) {
         tcp_win       = $tcpwin
         icmp_type     = $icmptype
         icmp_code     = $icmpcode
-        direction     = $info                    # SEND/RECEIVE
+        direction     = $info
         image_path    = $image
         pid           = $pid
         process_name  = $procName
