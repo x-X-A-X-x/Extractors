@@ -1,27 +1,17 @@
 <#
-ELExtract_SplunkJSON.ps1
-Exports Windows Event Logs as JSON Lines (NDJSON) per log so Splunk auto-extracts fields.
-- One output file per log: <LogName>_Logs.json
-- Promotes EventData fields to top-level for easier Splunk search
-- Admin check (Security usually needs elevation)
-- Channel availability/enabled checks
-- Summary of extracted counts
+Exports Windows Event Logs as JSON Lines (NDJSON), one file per log.
+Designed for Splunk (sourcetype=_json). Promotes EventData keys to top level.
 
 Examples:
-  .\ELExtract_SplunkJSON.ps1
+  .\ELExtract_SplunkJSON.ps1 -All -Oldest
   .\ELExtract_SplunkJSON.ps1 -DaysBack 30
-  .\ELExtract_SplunkJSON.ps1 -StartTime "2025-07-01" -EndTime "2025-08-11"
-  .\ELExtract_SplunkJSON.ps1 -Logs @("System","Application","Security")
-  .\ELExtract_SplunkJSON.ps1 -OutDir "C:\Logs" -VerboseSummary
+  .\ELExtract_SplunkJSON.ps1 -Logs Security,System -OutDir C:\Logs -NoMessageFormat
 #>
 
 [CmdletBinding()]
 param(
-  [Parameter()]
   [string[]]$Logs = @(
-    # Core channels
     "System","Application","Security","Setup",
-    # Useful operational channels (disable if you don’t need them)
     "Microsoft-Windows-PowerShell/Operational",
     "Microsoft-Windows-Windows Defender/Operational",
     "Microsoft-Windows-DNS-Client/Operational",
@@ -31,13 +21,15 @@ param(
 
   [int]$DaysBack = 7,
 
-  # If StartTime is provided, it overrides DaysBack
   [datetime]$StartTime,
 
   [datetime]$EndTime = (Get-Date),
 
   [string]$OutDir = $PSScriptRoot,
 
+  [switch]$All,            # ignore Start/End; export entire current log
+  [switch]$Oldest,         # iterate from oldest record forward
+  [switch]$NoMessageFormat,# do not call FormatDescription()
   [switch]$VerboseSummary
 )
 
@@ -50,11 +42,11 @@ function Test-IsAdmin {
 }
 
 function Convert-WinEventToJsonObject {
-  param([System.Diagnostics.Eventing.Reader.EventRecord]$Event)
+  param([System.Diagnostics.Eventing.Reader.EventRecord]$Event, [switch]$NoFmt)
 
   $xml = [xml]$Event.ToXml()
 
-  # Flatten <EventData><Data Name="...">value</Data></EventData>
+  # Flatten EventData
   $eventData = @{}
   foreach ($d in $xml.Event.EventData.Data) {
     if ($null -ne $d) {
@@ -65,9 +57,14 @@ function Convert-WinEventToJsonObject {
     }
   }
 
-  # Build base object
+  # Safe message formatting
+  $msg = $null
+  if (-not $NoFmt) {
+    try { $msg = $Event.FormatDescription() } catch { $msg = $null }
+  }
+
   $obj = [ordered]@{
-    _time          = [int](Get-Date $Event.TimeCreated -UFormat %s)  # epoch seconds
+    _time          = [int](Get-Date $Event.TimeCreated -UFormat %s)
     TimeCreated    = $Event.TimeCreated
     LogName        = $Event.LogName
     EventID        = $Event.Id
@@ -84,37 +81,36 @@ function Convert-WinEventToJsonObject {
     Channel        = [string]$xml.Event.System.Channel
     SecurityUserId = [string]$xml.Event.System.Security.UserID
     Correlation    = [string]$xml.Event.System.Correlation.ActivityID
-    Message        = $Event.FormatDescription()
+    Message        = $msg
     EventData      = $eventData
   }
 
-  # Promote EventData keys to top-level when not colliding
   foreach ($k in $eventData.Keys) {
-    if (-not $obj.ContainsKey($k)) {
-      $obj[$k] = $eventData[$k]
-    }
+    if (-not $obj.ContainsKey($k)) { $obj[$k] = $eventData[$k] }
   }
 
   return [pscustomobject]$obj
 }
 
-# Resolve time window
-if (-not $PSBoundParameters.ContainsKey('StartTime')) {
-  $StartTime = (Get-Date).AddDays(-1 * $DaysBack)
+# Resolve time window unless -All specified
+if (-not $All) {
+  if (-not $PSBoundParameters.ContainsKey('StartTime')) {
+    $StartTime = (Get-Date).AddDays(-1 * $DaysBack)
+  }
 }
 
-# Ensure output dir exists
+# Ensure output dir
 if ([string]::IsNullOrWhiteSpace($OutDir)) { $OutDir = $PSScriptRoot }
 if (-not (Test-Path -LiteralPath $OutDir)) {
   New-Item -ItemType Directory -Path $OutDir | Out-Null
 }
 
-$admin = Test-IsAdmin
-if (-not $admin) {
+# Admin warning
+if (-not (Test-IsAdmin)) {
   Write-Host "Warning: Not running as Administrator. Security and some channels may not return all events."
 }
 
-# Pre-flight: list channel info
+# Pre-flight: get channel info
 $channelInfo = @{}
 foreach ($log in $Logs) {
   try {
@@ -137,24 +133,43 @@ foreach ($log in $Logs) {
   }
 
   $outFile = Join-Path $OutDir ("{0}_Logs.json" -f ($log -replace '[\\/:*?"<>|]', '_'))
-  Write-Host ("Extracting {0} from {1:u} to {2:u} ..." -f $log, $StartTime, $EndTime)
+  Write-Host ("Extracting {0} ..." -f $log)
 
   $sw = $null
   $written = 0
   try {
     $sw = New-Object System.IO.StreamWriter($outFile, $false, [System.Text.Encoding]::UTF8)
 
-    $query = @{
-      LogName   = $log
-      StartTime = $StartTime
-      EndTime   = $EndTime
-    }
-
-    Get-WinEvent -FilterHashtable $query -ErrorAction Stop | ForEach-Object {
-      $obj  = Convert-WinEventToJsonObject -Event $_
-      $json = $obj | ConvertTo-Json -Depth 6 -Compress
-      $sw.WriteLine($json)
-      $written++
+    if ($All) {
+      # No time filter; optionally iterate from oldest
+      if ($Oldest) {
+        Get-WinEvent -LogName $log -Oldest -ErrorAction Stop | ForEach-Object {
+          $obj  = Convert-WinEventToJsonObject -Event $_ -NoFmt:$NoMessageFormat
+          $json = $obj | ConvertTo-Json -Depth 6 -Compress
+          $sw.WriteLine($json); $written++
+        }
+      } else {
+        Get-WinEvent -LogName $log -ErrorAction Stop | ForEach-Object {
+          $obj  = Convert-WinEventToJsonObject -Event $_ -NoFmt:$NoMessageFormat
+          $json = $obj | ConvertTo-Json -Depth 6 -Compress
+          $sw.WriteLine($json); $written++
+        }
+      }
+    } else {
+      $query = @{ LogName = $log; StartTime = $StartTime; EndTime = $EndTime }
+      if ($Oldest) {
+        Get-WinEvent -FilterHashtable $query -Oldest -ErrorAction Stop | ForEach-Object {
+          $obj  = Convert-WinEventToJsonObject -Event $_ -NoFmt:$NoMessageFormat
+          $json = $obj | ConvertTo-Json -Depth 6 -Compress
+          $sw.WriteLine($json); $written++
+        }
+      } else {
+        Get-WinEvent -FilterHashtable $query -ErrorAction Stop | ForEach-Object {
+          $obj  = Convert-WinEventToJsonObject -Event $_ -NoFmt:$NoMessageFormat
+          $json = $obj | ConvertTo-Json -Depth 6 -Compress
+          $sw.WriteLine($json); $written++
+        }
+      }
     }
 
     $sw.Close()
@@ -193,4 +208,4 @@ if ($VerboseSummary) {
 }
 
 Write-Host ""
-Write-Host "Tip: In Splunk, set sourcetype=_json on the monitored path so fields auto-extract."
+Write-Host "Tip: In Splunk, monitor the output folder and set sourcetype=_json for automatic field extraction."
