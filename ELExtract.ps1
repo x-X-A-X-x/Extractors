@@ -1,8 +1,8 @@
 <# 
-Extract Windows Event Logs into Splunk-friendly CSVs.
-- One CSV per log: System, Application, Security, Setup
-- Stable columns: common metadata + auto-expanded EventData keys
-- Timestamps in ISO 8601
+Extract Windows Event Logs into Splunk-friendly CSVs (one file per log).
+- Stable columns (metadata + expanded EventData keys)
+- ISO 8601 timestamps
+- Robust ExportPath resolution
 #>
 
 [CmdletBinding()]
@@ -10,20 +10,28 @@ param(
     [string[]]$Logs = @('System','Application','Security','Setup'),
     [datetime]$StartTime = (Get-Date).AddDays(-7),
     [datetime]$EndTime   = (Get-Date),
-    [string]$ExportPath  = $PSScriptRoot  # default: script folder
+    [string]$ExportPath  # optional; if omitted, use script folder; fallback: current dir
 )
 
-if (-not (Test-Path $ExportPath)) {
-    New-Item -ItemType Directory -Path $ExportPath | Out-Null
+# --- Resolve ExportPath robustly ---
+if ([string]::IsNullOrWhiteSpace($ExportPath)) {
+    # Try the script’s directory first
+    $ExportPath = Split-Path -Parent -Path $MyInvocation.MyCommand.Path
+    # Fallback to current directory if still empty (e.g., rare host scenarios)
+    if ([string]::IsNullOrWhiteSpace($ExportPath)) {
+        $ExportPath = (Get-Location).Path
+    }
+}
+
+if (-not (Test-Path -LiteralPath $ExportPath)) {
+    New-Item -ItemType Directory -Path $ExportPath -Force | Out-Null
 }
 
 foreach ($Log in $Logs) {
     Write-Host "`nExtracting $Log ..."
-
     try {
-        # First pass: collect union of all EventData keys for a stable CSV header
+        # First pass: gather union of EventData keys for stable header
         $allKeys = [System.Collections.Generic.HashSet[string]]::new()
-
         $events = Get-WinEvent -FilterHashtable @{
             LogName   = $Log
             StartTime = $StartTime
@@ -37,22 +45,20 @@ foreach ($Log in $Logs) {
             }
         }
 
-        # Sort keys for stable column order
         $eventDataKeys = $allKeys | Sort-Object
 
         # Second pass: build rows with consistent schema
         $rows = foreach ($ev in $events) {
             $xml = [xml]$ev.ToXml()
 
-            # Map EventData into a dictionary
             $kv = @{}
             foreach ($d in $xml.Event.EventData.Data) {
                 $name = [string]$d.Name
                 if ($name) { $kv[$name] = [string]$d.'#text' }
             }
 
-            # Common metadata
-            [pscustomobject]@{
+            # Common metadata (good for Splunk)
+            $base = [pscustomobject]@{
                 TimeCreatedISO      = $ev.TimeCreated.ToString("o")
                 EventID             = $ev.Id
                 Level               = $ev.Level
@@ -69,21 +75,16 @@ foreach ($Log in $Logs) {
                 UserId              = $ev.UserId
                 SourceLog           = $Log
                 Message             = $ev.Message
-                # EventData keys expanded below
-            } | ForEach-Object {
-                $base = $_ | Select-Object *  # clone PSCustomObject
-                foreach ($k in $eventDataKeys) {
-                    # Add property per key; empty if not present in this event
-                    Add-Member -InputObject $base -NotePropertyName $k -NotePropertyValue ($kv[$k]) -Force
-                }
-                $base
             }
+
+            foreach ($k in $eventDataKeys) {
+                Add-Member -InputObject $base -NotePropertyName $k -NotePropertyValue ($kv[$k]) -Force
+            }
+            $base
         }
 
-        $outFile = Join-Path $ExportPath ("{0}_Logs.csv" -f $Log)
+        $outFile = Join-Path -Path $ExportPath -ChildPath ("{0}_Logs.csv" -f $Log)
         if ($rows.Count -gt 0) {
-            # Export with a stable header (metadata first, then EventData keys)
-            # Compute explicit column order
             $metaColumns = @(
                 'TimeCreatedISO','EventID','Level','LevelDisplayName','ProviderName','MachineName',
                 'Channel','RecordId','Task','Opcode','Keywords','ProcessId','ThreadId','UserId','SourceLog','Message'
@@ -91,8 +92,7 @@ foreach ($Log in $Logs) {
             $allColumns = $metaColumns + $eventDataKeys
             $rows | Select-Object $allColumns | Export-Csv -Path $outFile -NoTypeInformation -Encoding UTF8
             Write-Host ("Exported {0} events to: {1}" -f $rows.Count, $outFile)
-        }
-        else {
+        } else {
             Write-Host "No events found for the specified time range."
         }
     }
