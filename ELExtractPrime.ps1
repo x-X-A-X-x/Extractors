@@ -1,3 +1,4 @@
+#This is the basis for ELExtractv2
 $dest = "C:\Logs"
 New-Item -ItemType Directory -Force -Path $dest | Out-Null
 
