@@ -16,7 +16,7 @@ def parse_eset_logs(xml_file):
             "time": time,
             "threat": threat,
             "detected": detected,
-            "cleaned": clea3ned
+            "cleaned": cleaned
         })
     return logs
 
