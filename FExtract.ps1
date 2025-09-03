@@ -1,4 +1,5 @@
 # --- auto-elevate ---
+# Do "powershell -ExecutionPolicy Bypass -File .\FExtract.ps1" on powershell to run this too, this is for sec purposes only
 $IsAdmin = ([Security.Principal.WindowsPrincipal] `
    [Security.Principal.WindowsIdentity]::GetCurrent()
 ).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
@@ -12,7 +13,7 @@ if (-not $IsAdmin) {
 # --- SETTINGS ---
 $logPathRaw = "%systemroot%\system32\LogFiles\Firewall\pfirewall.log"
 $logPath    = [Environment]::ExpandEnvironmentVariables($logPathRaw)
-$outFile    = Join-Path $env:USERPROFILE "Desktop\firewall_with_process.json"
+$outFile = Join-Path $PSScriptRoot "firewall_with_process.json"
 $RelocateIfDenied = $true
 
 function Read-FwLog {
