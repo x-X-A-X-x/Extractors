@@ -1,13 +1,14 @@
 <# 
 Exports Windows logs (Application, Security, Setup, System) to EVTX and Splunk-friendly JSONL.
 Run in elevated PowerShell for Security log access.
+Do "powershell -ExecutionPolicy Bypass -File .\ELExtractv2.ps1" on powershell to run this too, this is for sec purposes only
 #>
 
 [CmdletBinding()]
 param(
     [string[]]$Channels = @('Application','Security','Setup','System'),
     [int]$Days = 7,
-    [string]$OutDir = 'C:\Logs'
+    [string]$OutDir = $PSScriptRoot
 )
 
 # Create output folder
