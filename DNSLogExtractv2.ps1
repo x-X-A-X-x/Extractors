@@ -1,7 +1,9 @@
 # Extract-DnsClient-Jsonl.ps1
+# Do "powershell -ExecutionPolicy Bypass -File .\DNSLogExtractv2.ps1" on powershell to run this too, this is for sec purposes only
+
 param(
   [string]$Evtx = 'C:\Windows\System32\winevt\Logs\Microsoft-Windows-DNS-Client%4Operational.evtx',
-  [string]$Out  = "$env:USERPROFILE\Desktop\dns_client_operational.jsonl",
+  [string]$Out  = "$PSScriptRoot\dns_client_operational.jsonl",
   [int[]] $EventIds = @(3008,3009,3010)  # query sent/completed/summary
 )
 
